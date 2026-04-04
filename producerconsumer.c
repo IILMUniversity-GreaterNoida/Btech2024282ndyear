@@ -2,103 +2,85 @@
 #include <stdlib.h>
 #include <windows.h>
 
-// ─── Globals ─────────────────────────────────────────────────
 int *buffer;
-int in  = 0;
-int out = 0;
 int BUFFER_SIZE;
-int TOTAL_ITEMS;
+int in = 0, out = 0;
+int n; // number of items
 
-HANDLE mutex;
-HANDLE empty;
-HANDLE full;
+HANDLE mutex, empty, full;
 
-// ─── Producer ────────────────────────────────────────────────
-DWORD WINAPI producer(LPVOID arg) {
+// Producer
+DWORD WINAPI producer(LPVOID param) {
     int item;
 
-    for (int i = 0; i < TOTAL_ITEMS; i++) {
+    for (int i = 0; i < n; i++) {
         item = rand() % 100;
 
         WaitForSingleObject(empty, INFINITE);
         WaitForSingleObject(mutex, INFINITE);
 
         buffer[in] = item;
-        printf("[Producer] Inserted: %d at index %d\n", item, in);
+        printf("Produced: %d at %d\n", item, in);
         in = (in + 1) % BUFFER_SIZE;
 
-        ReleaseSemaphore(mutex, 1, NULL);
-        ReleaseSemaphore(full,  1, NULL);
+        ReleaseMutex(mutex);
+        ReleaseSemaphore(full, 1, NULL);
 
-        Sleep(1000);
+        Sleep(500);
     }
-
-    printf("[Producer] Done producing.\n");
     return 0;
 }
 
-// ─── Consumer ────────────────────────────────────────────────
-DWORD WINAPI consumer(LPVOID arg) {
+// Consumer
+DWORD WINAPI consumer(LPVOID param) {
     int item;
 
-    for (int i = 0; i < TOTAL_ITEMS; i++) {
-
-        WaitForSingleObject(full,  INFINITE);
+    for (int i = 0; i < n; i++) {
+        WaitForSingleObject(full, INFINITE);
         WaitForSingleObject(mutex, INFINITE);
 
         item = buffer[out];
-        printf("[Consumer] Removed:   %d from index %d\n", item, out);
+        printf("Consumed: %d from %d\n", item, out);
         out = (out + 1) % BUFFER_SIZE;
 
-        ReleaseSemaphore(mutex, 1, NULL);
+        ReleaseMutex(mutex);
         ReleaseSemaphore(empty, 1, NULL);
 
-        Sleep(2000);
+        Sleep(500);
     }
-
-    printf("[Consumer] Done consuming.\n");
     return 0;
 }
 
-// ─── Main ─────────────────────────────────────────────────────
 int main() {
-    HANDLE threads[2];
+    HANDLE p, c;
 
-    // ─── User Input ──────────────────────────────────────────
-    printf("=== Producer Consumer Problem ===\n\n");
-
+    // USER INPUT
     printf("Enter buffer size: ");
     scanf("%d", &BUFFER_SIZE);
 
-    printf("Enter total items to produce: ");
-    scanf("%d", &TOTAL_ITEMS);
+    printf("Enter number of items to produce: ");
+    scanf("%d", &n);
 
-    // Dynamically allocate buffer based on user input
-    buffer = (int *)malloc(BUFFER_SIZE * sizeof(int));
+    buffer = (int*)malloc(BUFFER_SIZE * sizeof(int));
 
-    printf("\nBuffer Size: %d | Total Items: %d\n", BUFFER_SIZE, TOTAL_ITEMS);
-    printf("-------------------------\n\n");
-
-    // ─── Semaphore Setup ─────────────────────────────────────
-    mutex = CreateSemaphore(NULL, 1,           1,           NULL);
+    // Initialize
+    mutex = CreateMutex(NULL, FALSE, NULL);
     empty = CreateSemaphore(NULL, BUFFER_SIZE, BUFFER_SIZE, NULL);
-    full  = CreateSemaphore(NULL, 0,           BUFFER_SIZE, NULL);
+    full = CreateSemaphore(NULL, 0, BUFFER_SIZE, NULL);
 
-    // ─── Thread Creation ─────────────────────────────────────
-    threads[0] = CreateThread(NULL, 0, producer, NULL, 0, NULL);
-    threads[1] = CreateThread(NULL, 0, consumer, NULL, 0, NULL);
+    // Create threads
+    p = CreateThread(NULL, 0, producer, NULL, 0, NULL);
+    c = CreateThread(NULL, 0, consumer, NULL, 0, NULL);
 
-    // ─── Wait for both to finish ─────────────────────────────
-    WaitForMultipleObjects(2, threads, TRUE, INFINITE);
+    // Wait
+    WaitForSingleObject(p, INFINITE);
+    WaitForSingleObject(c, INFINITE);
 
-    // ─── Cleanup ─────────────────────────────────────────────
-    free(buffer);
+    // Cleanup
     CloseHandle(mutex);
     CloseHandle(empty);
     CloseHandle(full);
-    CloseHandle(threads[0]);
-    CloseHandle(threads[1]);
+    free(buffer);
 
-    printf("\n[Main] All done. Program exiting cleanly.\n");
     return 0;
 }
