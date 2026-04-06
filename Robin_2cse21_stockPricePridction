@@ -1,0 +1,215 @@
+import numpy as np
+import pandas as pd
+import yfinance as yf
+from keras.models import load_model
+import streamlit as st
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from sklearn.preprocessing import MinMaxScaler
+from datetime import datetime
+
+# ── Page Config ──────────────────────────────────────────────
+st.set_page_config(
+    page_title="Stock Predictor Pro",
+    page_icon="📈",
+    layout="wide"
+)
+
+# ── Custom CSS ────────────────────────────────────────────────
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Syne', sans-serif;
+        background-color: #0a0a0f;
+        color: #e0e0e0;
+    }
+    .stApp { background-color: #0a0a0f; }
+
+    .main-title {
+        font-size: 3.2rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, #00ff88, #00b4ff);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+        margin-bottom: 0.2rem;
+    }
+    .subtitle {
+        text-align: center;
+        color: #888;
+        font-size: 1rem;
+        margin-bottom: 2rem;
+        font-family: 'Space Mono', monospace;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #111118, #1a1a2e);
+        border: 1px solid #00ff8830;
+        border-radius: 16px;
+        padding: 1.2rem 1.5rem;
+        text-align: center;
+    }
+    .metric-label {
+        font-size: 0.75rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        font-family: 'Space Mono', monospace;
+    }
+    .metric-value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #00ff88;
+    }
+    .section-title {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #00b4ff;
+        border-left: 4px solid #00ff88;
+        padding-left: 0.8rem;
+        margin: 1.5rem 0 1rem 0;
+        font-family: 'Space Mono', monospace;
+    }
+    div[data-testid="stTextInput"] input {
+        background-color: #111118;
+        color: #00ff88;
+        border: 1px solid #00ff8850;
+        border-radius: 10px;
+        font-family: 'Space Mono', monospace;
+        font-size: 1.1rem;
+        padding: 0.6rem 1rem;
+    }
+    .stDataFrame { border-radius: 12px; overflow: hidden; }
+    footer { visibility: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Header ────────────────────────────────────────────────────
+st.markdown('<div class="main-title">📈 Stock Predictor Pro</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">LSTM-powered stock price prediction engine</div>', unsafe_allow_html=True)
+
+# ── Input ─────────────────────────────────────────────────────
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    stock = st.text_input('', 'GOOG', placeholder='Enter ticker e.g. GOOG, TSLA, AAPL')
+
+start = '2012-01-01'
+end = datetime.now().strftime('%Y-%m-%d')
+
+# ── Load Data ─────────────────────────────────────────────────
+with st.spinner('Fetching stock data...'):
+    data = yf.download(stock, start, end)
+
+if data.empty:
+    st.error(f"❌ Ticker '{stock}' not found! Try: GOOG, TSLA, AAPL, MSFT, RELIANCE.NS")
+    st.stop()
+
+# ── Metrics Row ───────────────────────────────────────────────
+latest = data['Close'].iloc[-1].item()
+prev = data['Close'].iloc[-2].item()
+change = latest - prev
+change_pct = (change / prev) * 100
+high_52 = data['Close'].max().item()
+low_52 = data['Close'].min().item()
+
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    st.markdown(f'<div class="metric-card"><div class="metric-label">Current Price</div><div class="metric-value">${latest:.2f}</div></div>', unsafe_allow_html=True)
+with c2:
+    color = "#00ff88" if change >= 0 else "#ff4444"
+    arrow = "▲" if change >= 0 else "▼"
+    st.markdown(f'<div class="metric-card"><div class="metric-label">Day Change</div><div class="metric-value" style="color:{color}">{arrow} {change_pct:.2f}%</div></div>', unsafe_allow_html=True)
+with c3:
+    st.markdown(f'<div class="metric-card"><div class="metric-label">52W High</div><div class="metric-value">${high_52:.2f}</div></div>', unsafe_allow_html=True)
+with c4:
+    st.markdown(f'<div class="metric-card"><div class="metric-label">52W Low</div><div class="metric-value" style="color:#ff4444">${low_52:.2f}</div></div>', unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ── Raw Data Table ────────────────────────────────────────────
+with st.expander("📊 View Raw Stock Data"):
+    st.dataframe(data.tail(20).style.background_gradient(cmap='Blues'), use_container_width=True)
+
+# ── Chart Style Setup ─────────────────────────────────────────
+plt.style.use('dark_background')
+def styled_fig():
+    fig, ax = plt.subplots(figsize=(12, 4))
+    fig.patch.set_facecolor('#111118')
+    ax.set_facecolor('#111118')
+    ax.tick_params(colors='#888', labelsize=9)
+    ax.spines['bottom'].set_color('#333')
+    ax.spines['left'].set_color('#333')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.grid(color='#1e1e2e', linestyle='--', linewidth=0.5)
+    return fig, ax
+
+# ── Moving Averages ───────────────────────────────────────────
+ma50 = data.Close.rolling(50).mean()
+ma100 = data.Close.rolling(100).mean()
+ma200 = data.Close.rolling(200).mean()
+
+st.markdown('<div class="section-title">Moving Averages Analysis</div>', unsafe_allow_html=True)
+
+col_a, col_b = st.columns(2)
+with col_a:
+    fig, ax = styled_fig()
+    ax.plot(data.index, data.Close, color='#ffffff30', linewidth=1)
+    ax.plot(data.index, ma50, color='#00ff88', linewidth=1.5, label='MA 50')
+    ax.plot(data.index, ma100, color='#00b4ff', linewidth=1.5, label='MA 100')
+    ax.legend(facecolor='#111118', edgecolor='#333', labelcolor='white', fontsize=9)
+    ax.set_title('MA 50 & MA 100', color='#aaa', fontsize=11, pad=10)
+    st.pyplot(fig)
+    plt.close()
+
+with col_b:
+    fig, ax = styled_fig()
+    ax.plot(data.index, data.Close, color='#ffffff30', linewidth=1)
+    ax.plot(data.index, ma100, color='#00b4ff', linewidth=1.5, label='MA 100')
+    ax.plot(data.index, ma200, color='#ff6b6b', linewidth=1.5, label='MA 200')
+    ax.legend(facecolor='#111118', edgecolor='#333', labelcolor='white', fontsize=9)
+    ax.set_title('MA 100 & MA 200', color='#aaa', fontsize=11, pad=10)
+    st.pyplot(fig)
+    plt.close()
+
+# ── Preprocessing ─────────────────────────────────────────────
+scaler = MinMaxScaler(feature_range=(0, 1))
+data_train = pd.DataFrame(data.Close[0:int(len(data)*0.80)])
+data_test = pd.DataFrame(data.Close[int(len(data)*0.80):len(data)])
+pas_100_days = data_train.tail(100)
+data_test_full = pd.concat([pas_100_days, data_test], ignore_index=True)
+data_test_scale = scaler.fit_transform(data_test_full)
+
+x, y = [], []
+for i in range(100, data_test_scale.shape[0]):
+    x.append(data_test_scale[i-100:i])
+    y.append(data_test_scale[i, 0])
+x, y = np.array(x), np.array(y)
+
+# ── Load Model & Predict ──────────────────────────────────────
+model = load_model('Stock Predictions Model.keras')
+with st.spinner('Running LSTM prediction...'):
+    predictions = model.predict(x)
+
+scale_factor = 1 / scaler.scale_[0]
+predictions = predictions * scale_factor
+y_actual = y * scale_factor
+
+# ── Prediction Chart ──────────────────────────────────────────
+st.markdown('<div class="section-title">Actual vs Predicted Price</div>', unsafe_allow_html=True)
+fig, ax = styled_fig()
+fig.set_size_inches(14, 5)
+ax.plot(y_actual, color='#00ff88', linewidth=1.5, label='Actual Price', alpha=0.9)
+ax.plot(predictions.flatten(), color='#ff6b6b', linewidth=1.5, label='Predicted Price', linestyle='--', alpha=0.9)
+ax.fill_between(range(len(y_actual)), y_actual, predictions.flatten(), alpha=0.05, color='#00b4ff')
+ax.legend(facecolor='#111118', edgecolor='#333', labelcolor='white', fontsize=10)
+ax.set_xlabel('Time (days)', color='#888', fontsize=10)
+ax.set_ylabel('Price (USD)', color='#888', fontsize=10)
+ax.set_title(f'{stock} — LSTM Price Prediction', color='#ccc', fontsize=13, pad=12)
+st.pyplot(fig)
+plt.close()
+
+# ── Footer ────────────────────────────────────────────────────
+st.markdown("---")
+st.markdown('<p style="text-align:center; color:#444; font-size:0.8rem; font-family: monospace;">Built with LSTM + TensorFlow · Stock Predictor Pro</p>', unsafe_allow_html=True)
